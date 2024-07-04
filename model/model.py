@@ -7,99 +7,98 @@ from database.DAO import DAO
 
 class Model:
     def __init__(self):
-        self._listMethod = []
-        self.reverseIdMapMethod = {}
-        self._listYear = []
-        self._listProduct = []
-        self.idMapProduct = {}
+        self._grafo = nx.DiGraph()
+        self.prezziMap={}
+        self.nodiRed=[]
+        self.bestSol=[]
+        self.maxDistanza = 0
 
-        self.nodes = []
-        self.edges = []
-        self.grafo = nx.DiGraph()
-        self.ricavi = {}
-        self.redditoNodi = []
-        self.nodiIniziali = []
 
-        self._bestPath = []
+    def getPrezzo(self, nodo):
+        return self.prezziMap[nodo]
 
-        self.loadMethod()
-        self.loadYears()
-        self.loadProduct()
 
-    def getBestPath(self):
-        self._bestPath = []
+    def searchPath(self):
 
-        for n in self.nodiIniziali:
-            parziale = [n]
-            archi_visitati = []
-            self._ricorsione(parziale, archi_visitati)
+        for n in self._grafo.nodes:
+            if not self._grafo.in_edges(n):
+                parziale=[n]
+                archi_visitati=[]
+                self.ricorsione(parziale,archi_visitati)
 
-        return self._bestPath
 
-    def _ricorsione(self, parziale, archi_visitati):
-        if len(parziale) > len(self._bestPath):
-            self._bestPath = copy.deepcopy(parziale)
 
-        for n in self.grafo[parziale[-1]]:
-            if (parziale[-1], n) not in archi_visitati:
-                archi_visitati.append((parziale[-1], n))
-                parziale.append(n)
-                self._ricorsione(parziale, archi_visitati)
-                archi_visitati.pop()
-                parziale.pop()
+    def ricorsione(self, parziale,archi_visitati):
+        last=parziale[-1]
+        vicini = self._grafo[last]
 
-    def getProdottiRedditizi(self):
-        tmp_prodotti = []
-        tmp_entranti = {}
-        self.nodiIniziali = []
-        for n in self.grafo.nodes:
-            eIn = len(self.grafo.in_edges(n))
-            eOut = len(self.grafo.out_edges(n))
-            if eOut == 0 and eIn > 0:
-                tmp_prodotti.append((n, self.ricavi[n]))
-                tmp_entranti[n] = eIn
+        vicini_utilizzabili=[]
+        for v in vicini:
+            if (last,v) not in archi_visitati:
+                vicini_utilizzabili.append(v)
 
-            if eIn == 0:
-                self.nodiIniziali.append(n)
-        tmp_prodotti = sorted(tmp_prodotti, key=lambda x: x[1], reverse=True)
-        return tmp_prodotti, tmp_entranti
 
-    def loadMethod(self):
-        self._listMethod = DAO.getMethods()
-        for m in self._listMethod:
-            self.reverseIdMapMethod[m.Order_method_type] = m
+        if len(vicini_utilizzabili)==0 and not self._grafo.out_edges(parziale[-1]):
+            distanza=len(parziale)
+            if distanza>self.maxDistanza:
+                self.maxDistanza= len(parziale)
+                self.bestSol = copy.deepcopy(parziale)
+            return
 
-    def loadYears(self):
-        self._listYear = DAO.getYears()
+        for v in vicini_utilizzabili :
+            archi_visitati.append((last,v))
+            parziale.append(v)
 
-    def loadProduct(self):
-        self._listProduct = DAO.getProduct()
-        for p in self._listProduct:
-            self.idMapProduct[p.Product_number] = p
+            self.ricorsione(parziale, archi_visitati)
 
-    def buildGraph(self, metodo, anno, soglia):
-        self.grafo.clear()
-        tmp_nodi = DAO.getNodes(self.idMapProduct, metodo.Order_method_code, anno)
-        for n in tmp_nodi:
-            self.nodes.append(n)
-        self.grafo.add_nodes_from(self.nodes)
+            archi_visitati.pop()
+            parziale.pop()
 
-        tmp_edge = DAO.getEdge(metodo.Order_method_code, anno)
-        for c in tmp_edge:
-            if float(c[3]) > (1 + soglia) * float(c[2]) and self.idMapProduct[c[0]] in self.nodes and self.idMapProduct[
-                c[1]] in self.nodes:
-                self.edges.append((self.idMapProduct[c[0]], self.idMapProduct[c[1]]))
-                self.grafo.add_edge(self.idMapProduct[c[0]], self.idMapProduct[c[1]])
-                self.ricavi[self.idMapProduct[c[0]]] = float(c[2])
-                self.ricavi[self.idMapProduct[c[1]]] = float(c[3])
 
-        """for a in self.edges:
-            self.grafo.add_edge(a[0], a[1])"""
 
-        """tmp_ric = DAO.getRicavo(metodo.Order_method_code, anno)
-        for r in tmp_ric:
-            if self.idMapProduct[r[0]] in self.nodes:
-                self.ricavi[self.idMapProduct[r[0]]] = float(r[1])"""
 
-    def getGraphSize(self):
-        return len(self.nodes), len(self.edges)
+    def getNodiRedditizzi(self):
+        prezzo=0
+        #print(self.prezziMap)
+
+        for n in self._grafo.nodes:
+            if not self._grafo[n]:
+                #print(n)
+                prezzo=self.prezziMap[n]
+                self.nodiRed.append((n,prezzo,len(self._grafo.in_edges(n))))
+        prodotti=sorted(self.nodiRed, key=lambda x:x[2], reverse=True)
+
+        return prodotti
+
+
+
+
+    def getmetodo(self):
+        return DAO.getMetodo()
+
+    def getAnni(self):
+        return DAO.getAnno()
+
+    def creaGrafo(self, metodo, anno, soglia):
+        self._grafo.clear()
+        nodi = DAO.getProdotti(metodo, anno)
+
+        self._grafo.add_nodes_from(nodi)
+
+        archi = DAO.getEdges(metodo,anno,soglia)
+        for e in archi:
+            self._grafo.add_edge(e[0],e[1])
+        self.calcolaPrezzo(metodo, anno)
+
+
+    def calcolaPrezzo(self, metodo, anno):
+        for p in DAO.getPrezzi(metodo, anno):
+            self.prezziMap[p[0]]=float(p[1])
+        return self.prezziMap
+
+    def getNumNodi(self):
+        return len(self._grafo.nodes)
+
+    def getNumArchi(self):
+        return len(self._grafo.edges)
+

@@ -6,108 +6,99 @@ from model.method import Method
 class DAO():
 
     @staticmethod
-    def getMethods():
+    def getMetodo():
         conn = DBConnect.get_connection()
         result = []
         cursor = conn.cursor(dictionary=True)
-        query = """SELECT *
-                    FROM go_methods"""
-        cursor.execute(query,)
-        for row in cursor:
-            result.append(Method(**row))
-
-        cursor.close()
-        conn.close()
-        return result
-
-    @staticmethod
-    def getYears():
-        conn = DBConnect.get_connection()
-        result = []
-        cursor = conn.cursor(dictionary=True)
-        query = """select distinct(extract(year from `Date`)) as anni
-                    from go_daily_sales gds """
+        query = """select Order_method_type as tipo
+                    from go_methods gm """
         cursor.execute(query, )
         for row in cursor:
-            result.append(row['anni'])
+            result.append(row["tipo"])
 
         cursor.close()
         conn.close()
         return result
 
+
+
+
     @staticmethod
-    def getProduct():
+    def getAnno():
         conn = DBConnect.get_connection()
         result = []
         cursor = conn.cursor(dictionary=True)
-        query = """select *
-                    from go_products"""
+        query = """select distinct year(`Date` ) as anno
+                    from go_daily_sales gds  """
         cursor.execute(query, )
         for row in cursor:
-            result.append(Product(**row))
+            result.append(row["anno"])
 
         cursor.close()
         conn.close()
         return result
 
     @staticmethod
-    def getNodes(idMap, metodo, anno):
+    def getProdotti(metodo, anno):
         conn = DBConnect.get_connection()
         result = []
         cursor = conn.cursor(dictionary=True)
-        query = """select distinct (Product_number)
-                    from go_daily_sales gds
-                    where Order_method_code = %s and extract(year from gds.`Date`) = %s """
+        query = """select Product_number as prodotto
+                    from go_daily_sales gds, go_methods gm 
+                    where gm.Order_method_type = %s
+                    and gm.Order_method_code = gds.Order_method_code 
+                    and year(gds.`Date`)=%s"""
+        cursor.execute(query, (metodo, anno,) )
+        for row in cursor:
+            result.append(row["prodotto"])
+
+        cursor.close()
+        conn.close()
+        return result
+
+    @staticmethod
+    def getPrezzi(metodo, anno):
+        conn = DBConnect.get_connection()
+        result = []
+        cursor = conn.cursor(dictionary=True)
+        query = """select Product_number as prodotto, sum(Quantity*Unit_sale_price) as ricavo  
+                        from go_daily_sales gds, go_methods gm 
+                        where gm.Order_method_type = %s
+                        and gm.Order_method_code = gds.Order_method_code 
+                        and year(gds.`Date`)=%s
+                        group by Product_number"""
         cursor.execute(query, (metodo, anno,))
         for row in cursor:
-            if idMap[row['Product_number']] is not None:
-                result.append((idMap[row['Product_number']]))
+            result.append((row["prodotto"], row["ricavo"]))
 
         cursor.close()
         conn.close()
         return result
 
     @staticmethod
-    def getEdge(metodo, anno):
+    def getEdges(metodo, anno,soglia):
         conn = DBConnect.get_connection()
         result = []
         cursor = conn.cursor(dictionary=True)
-        query = """select p1, p2, ricavoTot1, ricavoTot2
-                    from (select gds.Product_number as p1, SUM(gds.Unit_sale_price * gds.Quantity) as ricavoTot1
-                            from go_daily_sales gds
-                            where gds.Order_method_code = %s and extract(year from gds.`Date`) = %s
-                            group by gds.Product_number) t1,
-                            (select gds.Product_number as p2, SUM(gds.Unit_sale_price * gds.Quantity) as ricavoTot2
-                                from go_daily_sales gds
-                                where gds.Order_method_code = %s and extract(year from gds.`Date`) = %s
-                                group by gds.Product_number) t2
-                    where t1.p1 != t2.p2"""
-        cursor.execute(query, (metodo, anno, metodo, anno,))
+        query = """select 	gds1.p1 as p1, gds2.p2 as p2, gds1.ricavoTot1 as ricavoTot1, gds2.ricavoTot2 as ricavoTot2
+                    from (select gds.Product_number as p1, sum(gds.Unit_sale_price * gds.Quantity) as ricavoTot1
+                        from go_daily_sales gds, go_methods gm 
+                        where gds.Order_method_code = gm.Order_method_code and year(gds.`Date`) = %s and gm.Order_method_type =%s
+                        group by gds.Product_number) gds1,
+                        (select gds.Product_number as p2, sum(gds.Unit_sale_price * gds.Quantity) as ricavoTot2
+                        from go_daily_sales gds, go_methods gm 
+                        where gds.Order_method_code = gm.Order_method_code and year(gds.`Date`) = %s and gm.Order_method_type =%s
+                        group by gds.Product_number) gds2
+                    where gds1.p1 != gds2.p2 and gds1.ricavoTot1*(1+%s)<gds2.ricavoTot2"""
+        cursor.execute(query, (anno, metodo, anno, metodo,soglia,))
         for row in cursor:
-            result.append((row['p1'],
-                           row['p2'],
-                           row['ricavoTot1'],
-                           row['ricavoTot2']))
+            result.append((row["p1"], row["p2"], row["ricavoTot1"], row["ricavoTot2"]))
 
         cursor.close()
         conn.close()
         return result
 
-    @staticmethod
-    def getRicavo(metodo, anno):
-        conn = DBConnect.get_connection()
-        result = []
-        cursor = conn.cursor(dictionary=True)
-        query = """select gds.Product_number as p1, SUM(gds.Unit_sale_price * gds.Quantity) as ricavoTot1
-                    from go_daily_sales gds, go_products p
-                    where gds.Order_method_code = %s and extract(year from gds.`Date`) = %s and gds.Product_number = p.Product_number
-                    group by p.Product_number"""
-        cursor.execute(query, (metodo, anno))
-        for row in cursor:
-            result.append((row['p1'],
-                           row['ricavoTot1']))
 
-        cursor.close()
-        conn.close()
-        return result
+
+
 
